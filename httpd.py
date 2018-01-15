@@ -13,6 +13,7 @@ import re
 from urllib import parse
 
 
+
 def url_normalize(path):
     if path.startswith("."):
         path = "/" + path
@@ -35,8 +36,11 @@ class FileProducer(object):
 
     def more(self):
         if self.file:
+            print("in if self.file")
             data = self.file.read(self.chunk_size)
+            print(data)
             if data:
+                print("in if data")
                 return data
             self.file.close()
             self.file = None
@@ -144,7 +148,7 @@ class AsyncHTTPRequestHandler(asynchat.async_chat):
         if len(matches) == 0:
             return False
         uri = matches[0]
-        self.uri = uri[1:-1]  # removing spaces from both sides
+        self.uri = uri[1:-1]
         self.uri = parse.unquote(self.uri)  # URLDecode
         self.uri = self.edit_path(self.uri)
         print("uri: '" + self.uri + "'")
@@ -162,7 +166,7 @@ class AsyncHTTPRequestHandler(asynchat.async_chat):
             if '?' in self.uri:
                 temp = self.uri
                 self.uri = re.findall('^(.*?)\?', temp)[0]
-                self.query_string = temp[len(self.uri) + 1:]  # 'http://mail.ru/get?a=b' <- len(uri) + 1 (?)
+                self.query_string = temp[len(self.uri) + 1:]
                 print("uri: '" + self.uri + "', query_string: '" + self.query_string + "'")
 
         elif self.method == 'POST':
@@ -209,7 +213,7 @@ class AsyncHTTPRequestHandler(asynchat.async_chat):
         except KeyError:
             message = 'WTF????'
 
-        self.push(get_bytes("HTTP/" + self.protocol_version + " " + str(code) + " " + message))
+        self.push(self.get_bytes("HTTP/" + self.protocol_version + " " + str(code) + " " + message))
         self.add_terminator()
 
         for key, value in self.response_headers.items():
@@ -217,10 +221,13 @@ class AsyncHTTPRequestHandler(asynchat.async_chat):
         self.add_terminator()
 
         if self.method == "POST":
-            self.push(get_bytes(self.body))
+            self.push(self.get_bytes(self.body))
         else:
             if len(content) > 0:
-                self.push(get_bytes(content))
+                if self.first_part == "image":
+                    self.send(content)
+                else:
+                    self.push(self.get_bytes(content))
 
         self.add_terminator()
         self.add_terminator()
@@ -230,21 +237,21 @@ class AsyncHTTPRequestHandler(asynchat.async_chat):
         return time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime())
 
     def send_header(self, keyword, value):
-        self.push(get_bytes(str(keyword) + ": " + str(value)))
+        self.push(self.get_bytes(str(keyword) + ": " + str(value)))
         self.add_terminator()
 
     def add_terminator(self):
-        self.push(get_bytes(self.term))
+        self.push(self.get_bytes(self.term))
 
     def do_GET(self, without_content=False):
         print("do_GET: uri == '" + self.uri + "'")
 
         valid_extensions = self.text_types + self.image_types
-        max_extension_length = len(max(valid_extensions, key=len)) + 1  # 1 is for dot
+        max_extension_length = len(max(valid_extensions, key=len)) + 1
 
         is_file = '.' in self.uri[-max_extension_length:]
 
-        if not is_file:  # wtf??
+        if not is_file:
             self.send_error(403)
             return
 
@@ -252,11 +259,14 @@ class AsyncHTTPRequestHandler(asynchat.async_chat):
             extension = self.uri.split(".")[-1:][0]
             if extension in valid_extensions:
                 self.response_headers['content-type'] = self.make_content_type_header(extension)
+                print(self.response_headers['content-type'])
                 reading_mode = 'r' if extension in self.text_types else 'rb'
                 with open(self.uri, reading_mode) as f:
                     data = f.read()
                     self.response_headers['content-length'] = len(data)
-                if without_content:  # called from do_HEAD
+
+
+                if without_content:  # Если метод HEAD
                     data = ''
                 self.send_error(200, data)
             else:
@@ -271,9 +281,9 @@ class AsyncHTTPRequestHandler(asynchat.async_chat):
         return s
 
     def make_content_type_header(self, extension):
-        first_part = 'text' if extension in self.text_types else 'image'
+        self.first_part = 'text' if extension in self.text_types else 'image'
         extension = self.convert_extension_to_content_type_ending(extension)
-        return str(first_part) + "/" + str(extension)
+        return str(self.first_part) + "/" + str(extension)
 
     def handle_data(self):
         f = self.send_head()
@@ -311,8 +321,8 @@ class AsyncHTTPRequestHandler(asynchat.async_chat):
         return path
 
 
-def get_bytes(s):
-    return bytes(str(s), 'utf-8')
+    def get_bytes(self, s):
+        return bytes(str(s), 'utf-8')
 
 
 def parse_args():
